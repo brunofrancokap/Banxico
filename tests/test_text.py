@@ -126,6 +126,43 @@ def test_section_labels_modern_era():
     ]
 
 
+@pytest.mark.parametrize("sentence, expected", [
+    # guidance com "hacia delante" no meio da frase (2025) e compromissos no futuro (2016–2019)
+    ("La Junta de Gobierno estima que hacia delante podría continuar con la calibración de la postura monetaria.", "guidance"),
+    ("Tomando en cuenta los retos, la Junta de Gobierno continuará dando seguimiento cercano a la inflación.", "guidance"),
+    ("La Junta mantendrá una postura monetaria prudente y continuará dando un seguimiento especial.", "guidance"),
+    ("Esta acción no inicia un ciclo de contracción monetaria.", "guidance"),
+    # reiteração da decisão no meio do comunicado
+    ("En este contexto, la Junta de Gobierno ha decidido por unanimidad mantener sin cambio el objetivo.", "assessment"),
+    # tema que aparece primeiro vence
+    ("Los indicadores de la actividad económica de México no han resentido el debilitamiento de la economía de Estados Unidos.", "domestic"),
+    ("La desaceleración económica mundial se ha intensificado en Europa y Japón.", "global"),
+    ("En México, las tasas de interés de valores gubernamentales presentaron movimientos acotados.", "markets"),
+    ("En México, la contracción de la actividad económica ha sido severa.", "domestic"),
+    ("Desde la última reunión, las inflaciones general y subyacente anuales siguieron descendiendo.", "inflation"),
+    ("En línea con las previsiones del Instituto Central, la inflación mostró un incremento en enero.", "inflation"),
+    ("Ante mayores presiones inflacionarias, los pronósticos de las inflaciones se revisaron al alza.", "forecast"),
+    ("Los pronósticos de inflación general permanecieron prácticamente sin cambio.", "forecast"),
+])
+def test_classify_sentence(sentence, expected):
+    from banxico.text.sections import classify
+
+    assert classify(sentence) == expected
+
+
+def test_guidance_fallback_inside_other_paragraph():
+    from banxico.structured import _guidance_text
+
+    paras = [
+        ("decision", "La Junta de Gobierno decidió mantener el objetivo en 7.00%."),
+        ("inflation", "La inflación general aumentó. Hacia adelante, la Junta de Gobierno seguirá muy de cerca "
+                      "la evolución de la inflación. Actuará con oportunidad."),
+    ]
+    assert _guidance_text(paras, "2017-03-30") == (
+        "Hacia adelante, la Junta de Gobierno seguirá muy de cerca la evolución de la inflación. Actuará con oportunidad.")
+    assert _guidance_text(paras, "2005-01-01") is None
+
+
 def test_decision_old_era_takes_last_mention():
     segs = label([
         _para("La Junta decidió ampliar el “corto” el 23 de septiembre. Desde entonces la inflación cedió."),

@@ -11,6 +11,8 @@ Exemplos:
     uv run banxico report --open            # HTML de todas as comparações t vs t-1 + índice
     uv run banxico diff --open              # último comunicado vs anterior, abre no navegador
     uv run banxico diff 2026-11-05 --vs 2024-03-21
+    uv run banxico market                   # carrega data/TIIE e calcula reação da curva (manual)
+    uv run banxico reactions --since 2025   # tabela de reações
     uv run banxico show 2026-11-05          # parágrafos de um comunicado
     uv run banxico status
 """
@@ -18,12 +20,14 @@ Exemplos:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 
 from .config import load_settings
 from .http import HttpClient
 from .pipeline import discover, download, extract, report, structure
+from .market.events import slopes
 from .storage import Store
 
 
@@ -74,6 +78,30 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-s", "--source", default="comunicados")
     sp.add_argument("--open", action="store_true", help="abre no navegador")
 
+    # --- saídas JSON para análise (usadas pelas skills em .claude/skills) ---
+    sp = sub.add_parser("context", help="JSON com decisão, votos, riscos, pronósticos, diff e ciclo de uma reunião")
+    sp.add_argument("date", nargs="?", help="data (padrão: a mais recente)")
+    sp.add_argument("--vs", help="reunião de referência (padrão: a anterior)")
+
+    sp = sub.add_parser("dissents", help="JSON com o histórico de dissidências nominais")
+    sp.add_argument("--member", help="filtra por nome (parcial, sem acento)")
+
+    sp = sub.add_parser("search", help="JSON: em quais comunicados uma expressão aparece")
+    sp.add_argument("phrase")
+    sp.add_argument("--section", help="decision|global|markets|domestic|inflation|forecast|assessment|guidance|vote")
+    sp.add_argument("--since", help="data inicial")
+
+    sub.add_parser("latest", help="JSON com o comunicado mais recente no banco")
+
+    sp = sub.add_parser("verify-quotes", help="confere se as citações de uma análise existem nos comunicados")
+    sp.add_argument("file", help="arquivo .md da análise")
+
+    sp = sub.add_parser("market", help="carrega data/TIIE (swaps TIIE 28/Fondeo, Treasuries) e calcula reações")
+    sp.add_argument("--dir", help="pasta dos CSVs (padrão: data/TIIE)")
+
+    sp = sub.add_parser("reactions", help="tabela de reação da curva às decisões")
+    sp.add_argument("--since", help="data inicial")
+
     sub.add_parser("status", help="resumo do registro de documentos")
     return p
 
@@ -118,6 +146,32 @@ def main(argv: list[str] | None = None) -> int:
             return _show(store, args)
         if args.cmd == "decisions":
             return _decisions(store, args)
+        if args.cmd == "market":
+            from pathlib import Path
+
+            from .pipeline import market_and_reports
+
+            market_and_reports(store, settings.sources["comunicados"], Path(args.dir) if args.dir else None)
+            return 0
+        if args.cmd == "reactions":
+            return _reactions(store, args)
+        if args.cmd in ("context", "dissents", "search", "latest", "verify-quotes"):
+            from . import context as ctx
+
+            if args.cmd == "verify-quotes":
+                data = ctx.verify_quotes(store, args.file)
+                print(json.dumps(data, ensure_ascii=False, indent=1))
+                return 1 if data["missing"] else 0
+            if args.cmd == "context":
+                data = ctx.meeting_context(store, args.date, args.vs)
+            elif args.cmd == "dissents":
+                data = ctx.dissent_history(store, args.member)
+            elif args.cmd == "search":
+                data = ctx.phrase_search(store, args.phrase, args.section, args.since)
+            else:
+                data = ctx.latest(store)
+            print(json.dumps(data, ensure_ascii=False, indent=1))
+            return 0
 
         failures = 0
         if args.cmd == "extract":
@@ -161,6 +215,31 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if failures else 0
     finally:
         store.close()
+
+
+def _reactions(store: Store, args: argparse.Namespace) -> int:
+    rows = store.market_reactions(args.since)
+    if not rows:
+        print("Sem reações. Rode `banxico market` (requer data/TIIE).")
+        return 1
+
+    def f(v, w=6):
+        return f"{v:+{w}.1f}" if v is not None else " " * (w - 1) + "—"
+
+    print(f"{'data':<10} {'fam':<6} {'decisão':<13} {'surpr':>6} {'via':<3} {'prec.':>6} {'Δ1y':>6} {'Δ2y':>6} "
+          f"{'Δ10y':>6} {'1s2s':>6} {'2s5s':>6} {'2s10s':>6} {'UST2y':>6}  avisos")
+    for r in rows:
+        d1 = json.loads(r["d1"]) if r["d1"] else {}
+        ust = json.loads(r["ust_d1"]) if r["ust_d1"] else {}
+        act = {"hike": "↑", "cut": "↓", "hold": "="}.get(r["action"], "?")
+        dec = f"{act} {r['change_bp'] or 0}pb {r['rate'] or '':}" if r["rate"] is not None else act
+        flags = "; ".join(json.loads(r["flags"])) if r["flags"] else ""
+        sl = slopes(d1)
+        print(f"{r['doc_date']} {r['family']:<6} {dec:<13} {f(r['surprise_bp'])} {r['surprise_tenor'] or '':<3} "
+              f"{f(r['priced_bp'])} {f(d1.get('1y'))} {f(d1.get('2y'))} {f(d1.get('10y'))} "
+              f"{f(sl['1s2s'])} {f(sl['2s5s'])} {f(sl['2s10s'])} "
+              f"{f(ust.get('2y'))}  {flags[:70]}")
+    return 0
 
 
 def _open(path) -> None:

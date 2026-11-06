@@ -4,6 +4,7 @@
     extract   PDF -> segments + data/text (.md)
     structure segments -> decisions + forecasts (+ data/exports/*.csv)
     report    comparações t vs t-1 -> data/reports/<fonte>/*.html
+    market    data/TIIE (Bloomberg) -> market_quotes + market_reactions (manual; não roda no sync)
 """
 
 from __future__ import annotations
@@ -190,6 +191,7 @@ def report(store: Store, source: SourceConfig, date: str | None = None, vs: str 
     """
     from .compare import diff_documents
     from .compare.report import decision_summary, describe_vote, flags, render_index, render_report
+    from .context import market_view
 
     docs = list(store.extracted_documents(source.id))
     by_date = {d["doc_date"]: i for i, d in enumerate(docs)}
@@ -207,7 +209,8 @@ def report(store: Store, source: SourceConfig, date: str | None = None, vs: str 
             nav["prev"] = fname(i_new - 1) if i_new - 1 >= 1 else None
             nav["next"] = fname(i_new + 1) if i_new + 1 < len(docs) else None
         html = render_report(new, old, diff, store.decision(new["id"]), store.decision(old["id"]),
-                             store.forecasts(new["id"]), store.forecasts(old["id"]), nav)
+                             store.forecasts(new["id"]), store.forecasts(old["id"]), nav,
+                             market=market_view(store, new["id"]))
         path = out_dir / (fname(i_new) if consecutive else f"{new['doc_date']}_vs_{old['doc_date']}.html")
         path.write_text(html, encoding="utf-8")
         return path, diff
@@ -243,3 +246,46 @@ def report(store: Store, source: SourceConfig, date: str | None = None, vs: str 
     (out_dir / "index.html").write_text(render_index(index_rows), encoding="utf-8")
     log.info("[%s] %d relatórios + index em %s", source.id, len(paths), out_dir)
     return paths
+
+
+def market(store: Store, folder=None) -> tuple[int, int]:
+    """Carrega data/TIIE (substitui tudo) e recalcula a reação da curva a cada decisão.
+    Retorna (nº de cotações, nº de reuniões com reação calculada)."""
+    import json
+
+    from .config import MARKET_DIR
+    from .market import Curve, compute_reactions, load_folder
+
+    folder = folder or MARKET_DIR
+    if not folder.exists():
+        raise SystemExit(f"Pasta de mercado não encontrada: {folder}")
+    quotes, notes = load_folder(folder)
+    for n in notes:
+        log.info("[market] %s", n)
+    store.replace_market_quotes([(q.series, q.date, q.value, q.source) for q in quotes])
+    for r in store.market_summary():
+        log.info("[market] %-7s %2d séries  %s -> %s  (%d cotações)", r["family"], r["n_series"], r["first"],
+                 r["last"], r["n"])
+
+    decisions = [r for r in store.decisions() if r["doc_date"] >= "2007-04-27"]
+    reactions = compute_reactions(Curve(store.market_quotes()), decisions)
+    rows = [{
+        "document_id": r.document_id, "doc_date": r.doc_date, "family": r.family,
+        "prev_date": r.prev_date, "next_date": r.next_date,
+        "d1": json.dumps(r.d1) if r.d1 else None, "d2": json.dumps(r.d2) if r.d2 else None,
+        "ust_d1": json.dumps(r.ust_d1) if r.ust_d1 else None,
+        "surprise_bp": r.surprise_bp, "surprise_tenor": r.surprise_tenor, "priced_bp": r.priced_bp,
+        "surprise_level_bp": r.surprise_level_bp, "path_bp": r.path_bp, "slope_bp": r.slope_bp,
+        "flags": json.dumps(r.flags, ensure_ascii=False) if r.flags else None,
+    } for r in reactions]
+    store.replace_market_reactions(rows)
+    ok = sum(1 for r in reactions if r.d1)
+    log.info("[market] reações calculadas para %d de %d decisões (desde 2007-04)", ok, len(reactions))
+    return len(quotes), ok
+
+
+def market_and_reports(store: Store, source: SourceConfig, folder=None) -> None:
+    """`banxico market`: carrega mercado e regenera os relatórios HTML (que exibem a reação)."""
+    market(store, folder)
+    if source.doc_type == "comunicado_pm":
+        report(store, source)

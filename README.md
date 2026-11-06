@@ -36,6 +36,32 @@ uv run banxico status                      # contagens por fonte/status e extra�
 Os comandos são idempotentes: rodar `sync` de novo só baixa/extrai o que é novo, o que falhou
 ou o que foi extraído com uma versão anterior do extrator.
 
+## Skills do Claude Code (análise interpretada)
+
+No Claude Code, dentro desta pasta:
+
+| comando | o que faz | salva em |
+|---|---|---|
+| `/banxico-atualizar` | `sync` + análise de cada comunicado novo | `analyses/diff/` |
+| `/banxico-diff [data] [--vs data]` | o que mudou vs. reunião anterior (ou outra), com tom relativo −2…+2 | `analyses/diff/` |
+| `/banxico-resumo [data]` | briefing da reunião no contexto do ciclo, com postura e tom | `analyses/resumo/` |
+| `/banxico-dissidencias [membro]` | histórico de votos dissidentes e padrões | `analyses/dissidencias/` |
+| `/banxico-busca "frase" [--section s]` | quando uma expressão apareceu/sumiu | `analyses/busca/` |
+
+As skills seguem o princípio **o código calcula, o Claude interpreta**: os números vêm dos
+comandos JSON abaixo, e toda citação é conferida com `verify-quotes` (precisa existir literalmente
+num comunicado). Escala de tom: `docs/escala-de-tom.md`. As análises ficam versionadas em `analyses/`.
+
+Comandos JSON usados pelas skills (também úteis para scripts):
+
+```powershell
+uv run banxico context 2026-11-05 [--vs DATA]   # decisão, votos, riscos, pronósticos, diff, ciclo
+uv run banxico dissents [--member heath]        # dissidências nominais com direção vs. maioria
+uv run banxico search "tiempo prolongado"       # linha do tempo de uma expressão
+uv run banxico latest                           # comunicado mais recente
+uv run banxico verify-quotes analyses/diff/2026-11-05.md
+```
+
 ## Texto extraído
 
 Cada PDF vira uma sequência de **segmentos** (tabela `segments` no SQLite e um `.md` legível em
@@ -51,8 +77,12 @@ Cada PDF vira uma sequência de **segmentos** (tabela `segments` no SQLite e um 
 
 Seções (`section`, só para `paragraph`, era 2008+): `decision · global · markets · domestic ·
 inflation · forecast · assessment · guidance · vote · other`. É um rótulo por palavras-chave na
-primeira frase: bom para alinhar e filtrar, não para análise fina. Na era 2000–2007 só `decision`
-é rotulada; o resto fica `other`.
+primeira frase (`text/sections.py:classify`): regras de função (voto, guidance, avaliação,
+pronóstico) têm prioridade; entre temas (global, mercados, doméstico, inflação) vence o que aparece
+primeiro na frase. Cobertura 2008+: ~51 de 1.131 parágrafos ficam `other`; guidance identificado em
+todos os comunicados desde 2016 (inclusive quando vem no meio de outro parágrafo: o campo
+`decisions.guidance` e o filtro `search --section` olham também a frase). Na era 2000–2007 só
+`decision` é rotulada; o resto fica `other`.
 
 Consulta de exemplo (`sqlite3 data/banxico.db`):
 
@@ -84,6 +114,31 @@ pronósticos em `forecasts`. Também exporta `data/exports/comunicados_decisions
 
 Hoje há 1 aviso em 239 reuniões: 2005-08-26, onde o PDF diz relaxamento de 25pb e o título do
 site diz só "el corto se mantiene sin cambio" (inconsistência da fonte, não do parser).
+
+## Reação de mercado (swaps de TIIE)
+
+Dados Bloomberg em `data/TIIE/` (fora do git por licença; carga manual, não roda no `sync`):
+
+```powershell
+uv run banxico market                  # carrega data/TIIE, calcula reações e regenera os HTML
+uv run banxico reactions --since 2025  # tabela: surpresa, precificado, Δ1a/2a/10a, inclinação
+```
+
+| arquivo | conteúdo | uso |
+|---|---|---|
+| `MPSW.csv` | swaps TIIE 28, 2007-04 → 2024-12 | família `tiie28_*` |
+| `MPSWF_combined.csv` | emenda: antes de 2025 = TIIE 28 − spread fixo (níveis artificiais) | só a parte Fondeo real (2025+, 1m desde 2024-12-19) |
+| `MPSWF_AAAAMMDD.csv` | snapshots: Fondeo + Treasuries | família `fondeo_*` e `ust_*` (mais recente prevalece) |
+
+Para cada decisão: Δ por prazo no dia (fechamento t−1 → t) e em 2 dias; **surpresa** = Δ do prazo
+mais curto (1m Fondeo; antes de 2025, 3m TIIE 28, mais ruidoso); na era Fondeo também o
+**precificado** na véspera (1m − tasa) e a surpresa por nível; **trajetória** = Δ1a − surpresa;
+**inclinação** = Δ10a − Δ2a; Treasuries no mesmo dia como controle. Regras da emenda: famílias
+separadas, nenhuma janela atravessa 2025-01-01, níveis nunca comparados entre famílias. Prints
+isolados errados na fonte são descartados por prazo (`flags`).
+
+Aparece no HTML (seção "Reação de mercado"), no `banxico context` (chave `market`) e nas skills
+`/banxico-diff` e `/banxico-resumo`, que passam a poder afirmar surpresa **com base na curva**.
 
 ## Relatórios de comparação (HTML)
 
@@ -131,7 +186,14 @@ src/banxico/
     align.py               alinhamento monotônico por programação dinâmica
     diff.py                diff parágrafo -> frase -> palavra
     report.py              HTML autocontido (relatório + índice)
+  context.py               saídas JSON para análise (context, dissents, search, verify-quotes)
+  market/                  dados de mercado (data/TIIE) e reação às decisões
+    loader.py              leitura dos CSVs Bloomberg; tratamento da emenda TIIE 28 -> Fondeo
+    events.py              janelas de evento, surpresa, trajetória, filtro de prints errados
   cli.py                   comando `banxico`
+.claude/skills/            skills /banxico-* (instruções para o Claude Code)
+docs/escala-de-tom.md      critérios da escala de tom −2…+2
+analyses/                  análises interpretadas (versionadas)
 data/                      (gitignored) banxico.db, raw/ (PDFs), text/ (.md)
 tests/
 ```
@@ -148,4 +210,4 @@ tests/
 3. ✅ Extração estruturada (decisão, taxa, votos/dissidências, projeções, riscos, guidance)
 4. ✅ Diff comunicado t vs t-1 → relatório HTML (redline + mudanças estruturadas)
 5. Minutas (fonte já configurada, `enabled = false`)
-6. Skills do Claude Code (`.claude/skills/`) para análise e comparação
+6. ✅ Skills do Claude Code (`.claude/skills/`) para análise e comparação

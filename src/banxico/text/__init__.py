@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-EXTRACTOR_VERSION = "comunicado-v2"  # v2: repetição só conta nas margens (bug "ciento." 2013-03-08)
+EXTRACTOR_VERSION = "comunicado-v4"  # v4: seções — guidance no meio da frase, tema que aparece primeiro, compromissos no futuro
 
 
 def extract_document(pdf_path: Path, doc_date: str):

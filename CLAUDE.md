@@ -15,6 +15,30 @@ monetária, minutas, etc.). O usuário é da área de trading/macro; respostas e
 - Texto legível de cada comunicado: `data/text/comunicados/<ano>/<data>_<guid>.md`
   (ou `uv run banxico show <data>`). Dados consultáveis: tabela `segments` / view `v_paragraphs`.
 
+## Dados de mercado (data/TIIE) — ATENÇÃO À EMENDA
+- Fornecidos pelo usuário (Bloomberg, licenciados: nunca versionar). **Não** são atualizados
+  diariamente; `banxico market` é manual e não roda no `sync`.
+- `MPSW.csv` = swaps TIIE 28 (2007-04 → 2024-12-31). `MPSWF_combined.csv` = emenda feita pelo
+  usuário: **antes de 2025 é TIIE 28 menos um spread fixo por prazo (−23,5 a −30 pb), níveis
+  artificiais**; Fondeo real só a partir de 2025-01-01 (1m desde 2024-12-19). Snapshots
+  `MPSWF_AAAAMMDD.csv` trazem Fondeo + Treasuries (só desde 2026-06).
+- Regras: famílias `tiie28_*` e `fondeo_*` separadas no banco; nenhuma janela atravessa 2025-01-01;
+  **nunca comparar níveis entre as famílias**; nível (priced/surprise_level) só na era Fondeo.
+- Armadilha de ticker: no arquivo de TIIE 28, `MPSWF` é o swap de **6 meses**.
+- Há prints errados na fonte (ex.: tiie28_1y em 2022-09-28); o filtro `is_bad_print` descarta o
+  prazo e registra em `flags`. Movimentos reais da curva inteira (2020-03-20) são mantidos.
+
+## Skills e análises
+- Skills em `.claude/skills/banxico-*`: diff, resumo, dissidencias, busca, atualizar.
+- Regra de ouro: números e citações só dos comandos JSON (`context`, `dissents`, `search`);
+  aspas só para texto literal dos comunicados, conferido com `banxico verify-quotes <arquivo>`.
+- Análises em `analyses/<tipo>/` (versionadas, cabeçalho YAML com notas de tom). Escala em
+  `docs/escala-de-tom.md`. Surpresa só com base na curva (`context` → `market`); nunca "consenso".
+- Filtro `--section` da busca usa o rótulo do parágrafo OU a classificação da frase (guidance de
+  2016–2019 vem no meio de outros parágrafos). Ainda heurístico: comparar com a busca sem filtro.
+- Ao mexer em `text/sections.py`: simular a mudança de rótulos em todo o corpus 2008+ e ler os
+  casos que mudaram antes de aplicar (regras novas costumam "roubar" parágrafos de outra seção).
+
 ## Convenções
 - Fontes são configuradas em `config/sources.toml`; parsers de listagem em `src/banxico/sources/`
   registrados em `PARSERS`. Não hardcode URLs no código.

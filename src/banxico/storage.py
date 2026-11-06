@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import DB_PATH, RAW_DIR
 from .models import DocumentRef
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -116,6 +116,36 @@ CREATE TABLE IF NOT EXISTS forecasts (
 );
 """
 
+SCHEMA_V4 = """
+-- Cotações de mercado (Bloomberg, data/TIIE). series = <família>_<prazo>: tiie28_2y, fondeo_1m, ust_10y.
+-- Famílias tiie28 (até 2024-12-31) e fondeo (2025+; 1m desde 2024-12-19) NÃO são comparáveis em nível.
+CREATE TABLE IF NOT EXISTS market_quotes (
+    series   TEXT NOT NULL,
+    date     TEXT NOT NULL,
+    value    REAL NOT NULL,         -- % a.a.
+    source   TEXT,
+    PRIMARY KEY (series, date)
+);
+-- Reação da curva a cada decisão (ver market/events.py). Recalculada inteira por `banxico market`.
+CREATE TABLE IF NOT EXISTS market_reactions (
+    document_id        TEXT PRIMARY KEY REFERENCES documents(id),
+    doc_date           TEXT NOT NULL,
+    family             TEXT NOT NULL,     -- tiie28 | fondeo
+    prev_date          TEXT,
+    next_date          TEXT,
+    d1                 TEXT,              -- JSON {prazo: pb}, t-1 -> t
+    d2                 TEXT,              -- JSON {prazo: pb}, t-1 -> t+1
+    ust_d1             TEXT,              -- JSON {prazo: pb}
+    surprise_bp        REAL,
+    surprise_tenor     TEXT,
+    priced_bp          REAL,              -- só era Fondeo
+    surprise_level_bp  REAL,              -- só era Fondeo
+    path_bp            REAL,
+    slope_bp           REAL,
+    flags              TEXT               -- JSON [aviso]
+);
+"""
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -139,7 +169,9 @@ class Store:
             self.conn.executescript(SCHEMA_V2)
         if current < 3:
             self.conn.executescript(SCHEMA_V3)
-        # Próximas migrações: `if current < 4: ...` (e incrementar SCHEMA_VERSION)
+        if current < 4:
+            self.conn.executescript(SCHEMA_V4)
+        # Próximas migrações: `if current < 5: ...` (e incrementar SCHEMA_VERSION)
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
@@ -303,6 +335,47 @@ class Store:
         return [(r["section"], r["text"]) for r in self.conn.execute(
             "SELECT section, text FROM segments WHERE document_id = ? AND kind = 'paragraph' ORDER BY seq",
             (doc_id,))]
+
+    # --- mercado -------------------------------------------------------------
+    def replace_market_quotes(self, rows: list[tuple]) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM market_quotes")
+            self.conn.executemany(
+                "INSERT INTO market_quotes (series, date, value, source) VALUES (?, ?, ?, ?)", rows)
+
+    def market_quotes(self) -> dict[str, dict[str, float]]:
+        out: dict[str, dict[str, float]] = {}
+        for s, d, v in self.conn.execute("SELECT series, date, value FROM market_quotes"):
+            out.setdefault(s, {})[d] = v
+        return out
+
+    def market_summary(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """SELECT substr(series, 1, instr(series, '_') - 1) AS family, COUNT(DISTINCT series) AS n_series,
+                      MIN(date) AS first, MAX(date) AS last, COUNT(*) AS n
+               FROM market_quotes GROUP BY family ORDER BY family"""
+        ).fetchall()
+
+    def replace_market_reactions(self, rows: list[dict]) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM market_reactions")
+            if rows:
+                cols = list(rows[0])
+                self.conn.executemany(
+                    f"INSERT INTO market_reactions ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                    [tuple(r[c] for c in cols) for r in rows])
+
+    def market_reaction(self, doc_id: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM market_reactions WHERE document_id = ?", (doc_id,)).fetchone()
+
+    def market_reactions(self, since: str | None = None) -> list[sqlite3.Row]:
+        sql = """SELECT m.*, d.action, d.change_bp, d.rate, d.vote_type, d.n_for, d.n_against
+                 FROM market_reactions m JOIN decisions d ON d.document_id = m.document_id"""
+        params: list = []
+        if since:
+            sql += " WHERE m.doc_date >= ?"
+            params.append(since)
+        return self.conn.execute(sql + " ORDER BY m.doc_date", params).fetchall()
 
     # --- arquivos -----------------------------------------------------------
     def raw_path_for(self, row: sqlite3.Row, ext: str) -> Path:

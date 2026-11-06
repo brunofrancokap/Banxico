@@ -12,6 +12,8 @@ CONFIG_PATH = Path(os.environ.get("BANXICO_CONFIG", PROJECT_ROOT / "config" / "s
 DATA_DIR = Path(os.environ.get("BANXICO_DATA_DIR", PROJECT_ROOT / "data"))
 RAW_DIR = DATA_DIR / "raw"
 DB_PATH = DATA_DIR / "banxico.db"
+# Dados de mercado (Bloomberg) fornecidos pelo usuário; fora do git por licença.
+MARKET_DIR = Path(os.environ.get("BANXICO_MARKET_DIR", DATA_DIR / "TIIE"))
 
 
 @dataclass(frozen=True)

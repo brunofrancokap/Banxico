@@ -16,7 +16,7 @@ from .forecasts import ForecastPoint, parse_forecast_table
 from .risks import RiskBalance, parse_risks
 from .votes import Votes, parse_votes
 
-STRUCT_VERSION = "struct-v1"
+STRUCT_VERSION = "struct-v2"  # v2: guidance também de frases no meio de parágrafos
 
 # Só quando o comunicado diz que ESTA decisão foi tomada em reunião extraordinária
 # (menções a reuniões extraordinárias passadas ou "medidas extraordinarias" não contam).
@@ -51,7 +51,7 @@ def parse_meeting(doc: Mapping, segments: Sequence[Mapping]) -> MeetingRecord:
         title=parse_title(doc["title"] or ""),
         votes=parse_votes(paragraphs),
         risks=parse_risks([t for _, t in paragraphs]),
-        guidance="\n\n".join(t for sec, t in paragraphs if sec == "guidance") or None,
+        guidance=_guidance_text(paragraphs, doc["doc_date"]),
         extraordinary=bool(_EXTRAORDINARY.search(all_text)),
     )
 
@@ -63,6 +63,28 @@ def parse_meeting(doc: Mapping, segments: Sequence[Mapping]) -> MeetingRecord:
 
     rec.checks.extend(_document_checks(rec))
     return rec
+
+
+def _guidance_text(paragraphs: list[tuple[str, str]], doc_date: str) -> str | None:
+    """Parágrafos rotulados guidance; se não houver (comum em 2016–2019), o trecho de cada
+    parágrafo que começa na primeira frase classificada como guidance, até o fim do parágrafo."""
+    from ..text.sections import classify
+    from ..text.sentences import split_sentences
+
+    whole = [t for sec, t in paragraphs if sec == "guidance"]
+    if whole:
+        return "\n\n".join(whole)
+    if doc_date < "2008-01-01":
+        return None
+    parts = []
+    for sec, text in paragraphs:
+        if sec in ("decision", "vote"):
+            continue
+        sents = split_sentences(text)
+        start = next((i for i, s in enumerate(sents) if classify(s) == "guidance"), None)
+        if start is not None:
+            parts.append(" ".join(sents[start:]))
+    return "\n\n".join(parts) or None
 
 
 def _document_checks(rec: MeetingRecord) -> list[str]:

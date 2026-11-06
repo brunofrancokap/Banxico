@@ -191,11 +191,63 @@ def _paragraph(p: ParagraphDiff) -> str:
             f'<div class="body text">{_render_ops(p)}</div></div>')
 
 
+MARKET_TENORS = ("1m", "3m", "6m", "1y", "2y", "3y", "5y", "10y", "30y")
+FAMILY_PT = {"tiie28": "swaps de TIIE 28", "fondeo": "swaps de TIIE de Fondeo (OIS)"}
+
+
+def _bp_cell(v: float | None) -> str:
+    if v is None:
+        return "<td></td>"
+    cls = "up" if v > 0 else "down" if v < 0 else "zero"
+    txt = "0" if v == 0 else f"{v:+.1f}".replace(".", ",")
+    return f'<td class="{cls}">{txt}</td>'
+
+
+def _market_section(m: Mapping | None) -> str:
+    if not m:
+        return ""
+    tenors = [t for t in MARKET_TENORS if t in m["d1_bp"] or t in m.get("d2_bp", {})]
+    head = "".join(f"<th>{t}</th>" for t in tenors)
+    w = m["window"]
+    rows = [f'<tr><td>Δ dia ({_date_br(w["prev"])} → {_date_br(w["decision"])})</td>'
+            f'{"".join(_bp_cell(m["d1_bp"].get(t)) for t in tenors)}</tr>']
+    if m.get("d2_bp"):
+        rows.append(f'<tr><td>Δ 2 dias (até {_date_br(w["next"])})</td>'
+                    f'{"".join(_bp_cell(m["d2_bp"].get(t)) for t in tenors)}</tr>')
+    if m.get("ust_d1_bp"):
+        rows.append(f'<tr><td>Treasuries EUA, Δ dia</td>{"".join(_bp_cell(m["ust_d1_bp"].get(t)) for t in tenors)}</tr>')
+
+    def fmt(v):
+        return "—" if v is None else f"{v:+.1f} pb".replace(".", ",")
+
+    bits = [f"surpresa ({m['surprise_tenor']}): <b>{fmt(m['surprise_bp'])}</b>"]
+    if (rk := m.get("surprise_abs_rank_in_family")):
+        fam = "Fondeo" if m["family"] == "fondeo" else "TIIE 28"
+        pos = "a maior" if rk["position"] == 1 else f"a {rk['position']}ª maior"
+        bits[-1] += f" ({pos} em módulo entre {rk['of']} reuniões da série {fam})"
+    if m.get("priced_bp") is not None:
+        bits.append(f"precificado na véspera: {fmt(m['priced_bp'])}")
+    if m.get("path_bp") is not None:
+        bits.append(f"trajetória (Δ1a − surpresa): {fmt(m['path_bp'])}")
+    incl = [f"{lbl} {fmt(m.get(f'slope_{k}_bp'))}" for k, lbl in (("1s2s", "1a–2a"), ("2s5s", "2a–5a"), ("2s10s", "2a–10a"))
+            if m.get(f"slope_{k}_bp") is not None]
+    if incl:
+        bits.append("inclinação: " + ", ".join(incl))
+    notes = "".join(f"<li>{escape(n)}</li>" for n in m.get("notes", []) + m.get("flags", []))
+    return (f'<h2>Reação de mercado</h2><div class="sub">{escape(FAMILY_PT.get(m["family"], m["family"]))}, '
+            f'variação em pb; fonte: Bloomberg (data/TIIE)</div>'
+            f'<div class="fcwrap"><table class="fc" style="margin-top:8px"><tr><th>janela</th>{head}</tr>'
+            f'{"".join(rows)}</table></div>'
+            f'<div style="margin-top:8px;font-size:14px">{" · ".join(bits)}</div>'
+            f'<ul class="sub" style="margin-top:6px">{notes}</ul>')
+
+
 def render_report(
     new_doc: Mapping, old_doc: Mapping, diff: DocDiff,
     new_dec: Mapping | None, old_dec: Mapping | None,
     new_fc: Sequence[Mapping], old_fc: Sequence[Mapping],
     nav: Mapping[str, str | None],
+    market: Mapping | None = None,
 ) -> str:
     nd, od = describe_decision(new_dec), describe_decision(old_dec)
     nv, ov = describe_vote(new_dec), describe_vote(old_dec)
@@ -234,6 +286,7 @@ def render_report(
 <a href="{escape(old_doc['url'])}">PDF {_date_br(old_doc['doc_date'])}</a></div>
 <div class="cards">{cards}</div>
 {_forecast_table(new_fc, old_fc, new_doc['doc_date'], old_doc['doc_date'])}
+{_market_section(market)}
 <h2>Texto</h2>
 <div class="toolbar"><label><input type="checkbox" id="hideUnchanged" checked> ocultar parágrafos sem mudança</label>
 <span class="legend"><del>removido</del> <ins>incluído</ins></span></div>
