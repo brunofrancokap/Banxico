@@ -1,0 +1,28 @@
+[project]
+name = "banxico"
+version = "0.1.0"
+description = "Coleta e comparação de comunicados oficiais do Banxico (comunicados de PM, minutas, etc.)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "pymupdf>=1.24",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[project.scripts]
+banxico = "banxico.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/banxico"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

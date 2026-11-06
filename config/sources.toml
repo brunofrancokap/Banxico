@@ -1,0 +1,28 @@
+# Registro de fontes de documentos do Banxico.
+# Para adicionar uma fonte nova: crie uma seção [sources.<id>] e aponte um `parser`
+# existente (ver src/banxico/sources/__init__.py). Nenhuma mudança de código é
+# necessária se a página usar o mesmo layout de tabela do CMS do Banxico.
+
+[http]
+base_url = "https://www.banxico.org.mx"
+user_agent = "banxico-research-scraper/0.1 (+python-requests)"
+timeout_seconds = 30
+delay_seconds = 1.0      # pausa entre downloads (educação com o servidor)
+max_retries = 3
+
+[sources.comunicados]
+name = "Anuncios de las decisiones de política monetaria"
+doc_type = "comunicado_pm"
+language = "es"
+parser = "banxico_table"
+listing_url = "https://www.banxico.org.mx/publicaciones-y-prensa/anuncios-de-las-decisiones-de-politica-monetaria/anuncios-politica-monetaria-t.html"
+enabled = true
+
+# Mesmo layout de tabela (validado). Habilitar quando for a hora das minutas.
+[sources.minutas]
+name = "Minutas de las decisiones de política monetaria"
+doc_type = "minuta_pm"
+language = "es"
+parser = "banxico_table"
+listing_url = "https://www.banxico.org.mx/publicaciones-y-prensa/minutas-de-las-decisiones-de-politica-monetaria/minutas-politica-monetaria-ta.html"
+enabled = false
