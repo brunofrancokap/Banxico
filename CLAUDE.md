@@ -29,7 +29,10 @@ monetária, minutas, etc.). O usuário é da área de trading/macro; respostas e
   prazo e registra em `flags`. Movimentos reais da curva inteira (2020-03-20) são mantidos.
 
 ## Skills e análises
-- Skills em `.claude/skills/banxico-*`: diff, resumo, dissidencias, busca, atualizar.
+- Skills em `.claude/skills/banxico-*`: diff, resumo, dissidencias, busca, atualizar, analogos.
+- `banxico analogs [data]` (src/banxico/analogs.py): sinalização de texto por regras (pausa/mais) +
+  distância padronizada das reações da curva. Mudou regra de `text_signal`? Rodar em todo o corpus e
+  ler as frases classificadas (preços e frases sobre o Fed devem ficar de fora).
 - Regra de ouro: números e citações só dos comandos JSON (`context`, `dissents`, `search`);
   aspas só para texto literal dos comunicados, conferido com `banxico verify-quotes <arquivo>`.
 - Análises em `analyses/<tipo>/` (versionadas, cabeçalho YAML com notas de tom). Escala em

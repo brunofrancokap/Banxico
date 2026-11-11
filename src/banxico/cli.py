@@ -93,6 +93,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("latest", help="JSON com o comunicado mais recente no banco")
 
+    sp = sub.add_parser("analogs", help="JSON: reuniões passadas parecidas (texto e reação da curva)")
+    sp.add_argument("date", nargs="?", help="data (padrão: a mais recente)")
+    sp.add_argument("-n", type=int, default=8, help="nº de análogos de mercado (padrão 8)")
+
     sp = sub.add_parser("verify-quotes", help="confere se as citações de uma análise existem nos comunicados")
     sp.add_argument("file", help="arquivo .md da análise")
 
@@ -155,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "reactions":
             return _reactions(store, args)
+        if args.cmd == "analogs":
+            from .analogs import find_analogs
+
+            print(json.dumps(find_analogs(store, args.date, args.n), ensure_ascii=False, indent=1))
+            return 0
         if args.cmd in ("context", "dissents", "search", "latest", "verify-quotes"):
             from . import context as ctx
 

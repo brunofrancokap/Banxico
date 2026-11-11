@@ -47,6 +47,7 @@ No Claude Code, dentro desta pasta:
 | `/banxico-resumo [data]` | briefing da reunião no contexto do ciclo, com postura e tom | `analyses/resumo/` |
 | `/banxico-dissidencias [membro]` | histórico de votos dissidentes e padrões | `analyses/dissidencias/` |
 | `/banxico-busca "frase" [--section s]` | quando uma expressão apareceu/sumiu | `analyses/busca/` |
+| `/banxico-analogos [data]` | reuniões passadas parecidas no texto e na curva, e o que veio depois | `analyses/analogos/` |
 
 As skills seguem o princípio **o código calcula, o Claude interpreta**: os números vêm dos
 comandos JSON abaixo, e toda citação é conferida com `verify-quotes` (precisa existir literalmente
@@ -58,6 +59,7 @@ Comandos JSON usados pelas skills (também úteis para scripts):
 uv run banxico context 2026-11-05 [--vs DATA]   # decisão, votos, riscos, pronósticos, diff, ciclo
 uv run banxico dissents [--member heath]        # dissidências nominais com direção vs. maioria
 uv run banxico search "tiempo prolongado"       # linha do tempo de uma expressão
+uv run banxico analogs 2026-11-05             # precedentes: sinalização do texto + reação da curva
 uv run banxico latest                           # comunicado mais recente
 uv run banxico verify-quotes analyses/diff/2026-11-05.md
 ```
@@ -121,7 +123,7 @@ Dados Bloomberg em `data/TIIE/` (fora do git por licença; carga manual, não ro
 
 ```powershell
 uv run banxico market                  # carrega data/TIIE, calcula reações e regenera os HTML
-uv run banxico reactions --since 2025  # tabela: surpresa, precificado, Δ1a/2a/10a, inclinação
+uv run banxico reactions --since 2025  # tabela: surpresa, precificado, Δ1a/2a/10a, inclinações 1s2s/2s5s/2s10s
 ```
 
 | arquivo | conteúdo | uso |
